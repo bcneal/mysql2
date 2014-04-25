@@ -53,9 +53,9 @@ static VALUE cMysql2Result;
 static VALUE cBigDecimal, cDate, cDateTime;
 static VALUE opt_decimal_zero, opt_float_zero, opt_time_year, opt_time_month, opt_utc_offset;
 extern VALUE mMysql2, cMysql2Client, cMysql2Error;
-static ID intern_new, intern_utc, intern_local, intern_localtime, intern_local_offset, intern_civil, intern_new_offset;
+static ID intern_new, intern_utc, intern_local, intern_localtime, intern_local_offset, intern_civil, intern_new_offset, intern_call;
 static VALUE sym_symbolize_keys, sym_as, sym_array, sym_struct, sym_database_timezone, sym_application_timezone,
-          sym_local, sym_utc, sym_cast_booleans, sym_cast_datetimes, sym_cache_rows, sym_cast, sym_stream, sym_name;
+          sym_local, sym_utc, sym_cast_booleans, sym_cast_datetimes, sym_cache_rows, sym_cast, sym_stream, sym_name, sym_streaming_complete, sym_on_streaming_complete;
 static ID intern_merge;
 
 /* internal :as constants */
@@ -436,8 +436,8 @@ static VALUE rb_mysql_result_fetch_fields(VALUE self) {
 }
 
 static VALUE rb_mysql_result_each(int argc, VALUE * argv, VALUE self) {
-  VALUE defaults, opts, block;
-  ID db_timezone, app_timezone, dbTz, appTz;
+  VALUE defaults, opts, block, on_streaming_complete;
+  ID db_timezone, app_timezone, dbTz, appTz, on_event;
   mysql2_result_wrapper * wrapper;
   unsigned long i;
   int symbolizeKeys = 0, as = AS_HASH, castBool = 0, castDateTimes = 0, cacheRows = 1, cast = 1, streaming = 0;
@@ -479,7 +479,13 @@ static VALUE rb_mysql_result_each(int argc, VALUE * argv, VALUE self) {
   }
 
   if(rb_hash_aref(opts, sym_stream) == Qtrue) {
+    puts("streaming!\n");
     streaming = 1;
+  }
+  if(rb_hash_aref(opts, sym_on_streaming_complete) != Qnil) {
+    puts("result: sym_on_streaming_complete is set\n");
+  } else {
+    puts("result: sym_on_streaming_complete is not set\n");
   }
 
   if(streaming && cacheRows) {
@@ -542,6 +548,28 @@ static VALUE rb_mysql_result_each(int argc, VALUE * argv, VALUE self) {
 
       wrapper->numberOfRows = wrapper->lastRowProcessed;
       wrapper->streamingComplete = 1;
+
+      defaults = rb_iv_get(self, "@query_options");
+      printf("defaults: inspect: %s\n", RSTRING(rb_inspect(defaults)));
+      on_streaming_complete = rb_hash_aref(defaults, sym_on_streaming_complete);
+      if (on_streaming_complete != Qnil) {
+        printf("on_streaming_complete is set: inspect: %s\n", RSTRING(rb_inspect(on_streaming_complete)));
+        rb_funcall(on_streaming_complete, intern_call, 0);
+/*        if (rb_respond_to(on_streaming_complete, ID2SYM(rb_intern("call")))) {
+            puts("it responds to call\n");
+            rb_funcall(on_streaming_complete, ID2SYM(rb_intern("call")), 0);
+        } else {
+            puts("it does not respond to call\n");
+        }
+*/
+      } else {
+        puts("on_streaming_complete is Qnil\n");
+      }
+      on_event = rb_intern("on_event");
+      if(rb_respond_to(self, on_event)) {
+        rb_funcall(self, on_event, 1, sym_streaming_complete);
+      }
+      
     } else {
       rb_raise(cMysql2Error, "You have already fetched all the rows for this query and streaming is true. (to reiterate you must requery).");
     }
@@ -635,6 +663,7 @@ void init_mysql2_result() {
   rb_define_alias(cMysql2Result, "size", "count");
 
   intern_new          = rb_intern("new");
+  intern_call         = rb_intern("call");
   intern_utc          = rb_intern("utc");
   intern_local        = rb_intern("local");
   intern_merge        = rb_intern("merge");
@@ -657,6 +686,8 @@ void init_mysql2_result() {
   sym_cast            = ID2SYM(rb_intern("cast"));
   sym_stream          = ID2SYM(rb_intern("stream"));
   sym_name            = ID2SYM(rb_intern("name"));
+  sym_streaming_complete    = ID2SYM(rb_intern("streaming_complete"));
+  sym_on_streaming_complete = ID2SYM(rb_intern("on_streaming_complete"));
 
   opt_decimal_zero = rb_str_new2("0.0");
   rb_global_variable(&opt_decimal_zero); /*never GC */

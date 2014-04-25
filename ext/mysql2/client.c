@@ -11,7 +11,7 @@
 
 VALUE cMysql2Client;
 extern VALUE mMysql2, cMysql2Error;
-static VALUE sym_id, sym_version, sym_async, sym_symbolize_keys, sym_as, sym_array, sym_stream;
+static VALUE sym_id, sym_version, sym_async, sym_symbolize_keys, sym_as, sym_array, sym_stream, sym_on_streaming_complete;
 static ID intern_merge, intern_error_number_eql, intern_sql_state_eql;
 
 #ifndef HAVE_RB_HASH_DUP
@@ -361,6 +361,7 @@ static VALUE rb_mysql_client_async_result(VALUE self) {
   if (NIL_P(wrapper->active_thread))
     return Qnil;
 
+
   REQUIRE_CONNECTED(wrapper);
   if (rb_thread_blocking_region(nogvl_read_query_result, wrapper->client, RUBY_UBF_IO, 0) == Qfalse) {
     /* an error occurred, mark this connection inactive */
@@ -369,6 +370,8 @@ static VALUE rb_mysql_client_async_result(VALUE self) {
   }
 
   VALUE is_streaming = rb_hash_aref(rb_iv_get(self, "@query_options"), sym_stream);
+  VALUE on_streaming_complete = rb_hash_aref(rb_iv_get(self, "@query_options"), sym_on_streaming_complete);
+  printf("is_streaming: %x on_streaming_complete: %x\n", is_streaming, on_streaming_complete);
   if(is_streaming == Qtrue) {
     result = (MYSQL_RES *)rb_thread_blocking_region(nogvl_use_result, wrapper, RUBY_UBF_IO, 0);
   } else {
@@ -385,6 +388,7 @@ static VALUE rb_mysql_client_async_result(VALUE self) {
   }
 
   resultObj = rb_mysql_result_to_obj(result);
+  puts("rb_mysql_client_async_result passing on options\n");
   /* pass-through query options for result construction later */
   rb_iv_set(resultObj, "@query_options", rb_hash_dup(rb_iv_get(self, "@query_options")));
 
@@ -539,6 +543,12 @@ static VALUE rb_mysql_client_query(int argc, VALUE * argv, VALUE self) {
   defaults = rb_iv_get(self, "@query_options");
   if (rb_scan_args(argc, argv, "11", &args.sql, &opts) == 2) {
     opts = rb_funcall(defaults, intern_merge, 1, opts);
+    puts("setting query options on client\n");
+    if ( rb_hash_aref(opts, ID2SYM(rb_intern("on_streaming_complete"))) != Qnil ) {
+        puts("on_streaming_complete is set");
+    } else {
+        puts("on_streaming_complete is not set");
+    }
     rb_iv_set(self, "@query_options", opts);
 
     if (rb_hash_aref(opts, sym_async) == Qtrue) {
@@ -936,6 +946,11 @@ static VALUE rb_mysql_client_store_result(VALUE self)
   }
 
   resultObj = rb_mysql_result_to_obj(result);
+  puts("rb_mysql_client_store_result passing on options\n");
+  VALUE is_streaming = rb_hash_aref(rb_iv_get(self, "@query_options"), sym_stream);
+  VALUE on_streaming_complete = rb_hash_aref(rb_iv_get(self, "@query_options"), sym_on_streaming_complete);
+  printf("is_streaming: %x on_streaming_complete: %x\n", is_streaming, on_streaming_complete);
+  
   /* pass-through query options for result construction later */
   rb_iv_set(resultObj, "@query_options", rb_hash_dup(rb_iv_get(self, "@query_options")));
 
@@ -1132,6 +1147,7 @@ void init_mysql2_client() {
   sym_as              = ID2SYM(rb_intern("as"));
   sym_array           = ID2SYM(rb_intern("array"));
   sym_stream          = ID2SYM(rb_intern("stream"));
+  sym_on_streaming_complete          = ID2SYM(rb_intern("on_streaming_complete"));
 
   intern_merge = rb_intern("merge");
   intern_error_number_eql = rb_intern("error_number=");
